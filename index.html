@@ -50,13 +50,16 @@
 <div class="chip" id="hint"></div>
 <div id="layer"></div>
 <div id="load">טוען את כלי הדם…</div>
-<script src="js/three.min.js"></script>
-<script src="js/GLTFLoader.js"></script>
-<script src="js/scene-data.js"></script>
-<script src="js/puzzle.js"></script>
+<script src="three.min.js"></script>
+<script src="GLTFLoader.js"></script>
+<script src="scene-data.js"></script>
+<script src="puzzle.js"></script>
 <script>
 (function () {
   'use strict';
+  if (!window.THREE || !window.THREE.GLTFLoader || !window.SCENE_GLB || !window.initPuzzle) {
+    document.getElementById('load').textContent = 'חסר קובץ בתיקייה, ולכן החידה לא נטענת'; return;
+  }
 
   // הניסוחים שעל המסך. הצעה לאישור ירדן.
   var T = {
