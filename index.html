@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0A0A0A">
+<title>חידת הנוגדנים · בתוך כלי הדם</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root { --bg: #0A0A0A; --green: #8AB21A; --pink: #FF77BC; --ink: #F4F1EA; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; background: var(--bg); color: var(--ink); overflow: hidden;
+    font-family: 'Heebo', Arial, sans-serif; -webkit-tap-highlight-color: transparent;
+    user-select: none; -webkit-user-select: none; touch-action: none; }
+  canvas#view { position: fixed; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; }
+  canvas#view.drag { cursor: grabbing; }
+  .chip { position: fixed; left: 50%; transform: translateX(-50%); padding: .35em 1.1em; border-radius: 99px;
+    background: rgba(10,10,10,.62); font-size: clamp(13px, 1.5vw, 19px); font-weight: 500; text-align: center;
+    pointer-events: none; transition: opacity .8s ease; white-space: nowrap; }
+  #hint { bottom: 18px; display: flex; align-items: center; gap: 1.1em; padding: .5em 1.2em; }
+  .keys { display: inline-grid; grid-template-columns: repeat(3, 22px); grid-template-rows: 22px 22px; gap: 3px; direction: ltr; }
+  .keys i { font-style: normal; font-size: 13px; line-height: 20px; border: 1.5px solid currentColor; border-radius: 5px; text-align: center; }
+  .keys i:nth-child(1) { grid-column: 2; grid-row: 1; } .keys i:nth-child(2) { grid-column: 1; grid-row: 2; }
+  .keys i:nth-child(3) { grid-column: 2; grid-row: 2; } .keys i:nth-child(4) { grid-column: 3; grid-row: 2; }
+  .pill.icon { padding: .25em .9em; display: inline-flex; align-items: center; justify-content: center; }
+  .pill.icon svg { width: 2em; height: 2em; display: block; }
+  #layer { font-size: clamp(13px, 1.6vw, 21px); }
+  .bar { position: fixed; bottom: 16px; left: 0; right: 0; display: flex; gap: .8em; align-items: center;
+    justify-content: center; flex-wrap: wrap; padding: 0 1em; pointer-events: none; }
+  .bar > * { pointer-events: auto; }
+  .pill { min-height: 44px; min-width: 44px; padding: .35em 1.3em; border-radius: 99px; font: inherit; font-weight: 500;
+    color: var(--ink); background: rgba(10,10,10,.72); border: 2px solid var(--green); cursor: pointer; }
+  .pill:hover, .pill:focus-visible { background: rgba(138,178,26,.3); outline: none; }
+  #hint.off { opacity: 0; }
+  #load { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: var(--bg);
+    font-size: 20px; font-weight: 500; transition: opacity .6s ease; }
+  #load.off { opacity: 0; pointer-events: none; }
+  /* ג׳ויסטיק מגע: מופיע במקום שבו נוגעים, בחצי השמאלי של המסך */
+  #stick { position: fixed; width: 110px; height: 110px; margin: -55px 0 0 -55px; border-radius: 50%;
+    border: 2px solid rgba(138,178,26,.8); background: rgba(10,10,10,.25); display: none; pointer-events: none; }
+  #stick i { position: absolute; left: 50%; top: 50%; width: 44px; height: 44px; margin: -22px 0 0 -22px;
+    border-radius: 50%; background: rgba(138,178,26,.85); }
+</style>
+</head>
+<body>
+<canvas id="view"></canvas>
+<div id="stick"><i></i></div>
+<div class="chip" id="hint"></div>
+<div id="layer"></div>
+<div id="load">טוען את כלי הדם…</div>
+<script src="js/three.min.js"></script>
+<script src="js/GLTFLoader.js"></script>
+<script src="js/scene-data.js"></script>
+<script src="js/puzzle.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  // הניסוחים שעל המסך. הצעה לאישור ירדן.
+  var T = {
+    keys: 'הולכים עם המקשים W A S D או עם החצים · גוררים כדי להסתכל',
+    touch: 'נוגעים בצד שמאל כדי ללכת · גוררים בצד ימין כדי להסתכל'
+  };
+
+  // רמז השליטה מוצג בסמלים, בלי מילים
+  var ICON = {
+    keys: '<span class="keys"><i>&uarr;</i><i>&larr;</i><i>&darr;</i><i>&rarr;</i></span>' +
+      '<svg viewBox="0 0 64 40" width="58" height="36" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">' +
+      '<rect x="24" y="4" width="16" height="30" rx="8"/><path d="M32 4v10M6 20h10M6 20l5-5M6 20l5 5M58 20H48M58 20l-5-5M58 20l-5 5"/></svg>',
+    touch: '<svg viewBox="0 0 120 40" width="110" height="36" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">' +
+      '<circle cx="24" cy="20" r="15"/><circle cx="24" cy="20" r="5" fill="currentColor"/>' +
+      '<circle cx="96" cy="20" r="6"/><path d="M70 20h12M70 20l5-5M70 20l5 5M122 20h-12M118 20l-5-5M118 20l-5 5"/></svg>'
+  };
+
+  // ---------- מידות החלל, כמו ב־build_scene.py (צירי Blender: Z למעלה) ----------
+  var X_START = 15, X_FUNNEL = -7, X_NECK = -9.6;
+  var CELL = [-3.0, 2.9, 1.45], TOX = [0.6, -0.9, 1.7], PED = [2.4, -3.25, 0.384], PH = [3.4, 3.6, 0.34];
+  var VX = -12.6, VZ = 2.3, VR = 2.7;
+  var EYE = 1.55;
+
+  function smoothstep(t) { t = Math.max(0, Math.min(1, t)); return t * t * (3 - 2 * t); }
+  function section(x) {
+    var t = x < X_FUNNEL ? smoothstep((X_FUNNEL - x) / (X_FUNNEL - X_NECK)) : 0;
+    return { a: 5 * (1 - t) + 2.5 * t, bt: 3.3 * (1 - t) + 1.6 * t, bb: 1.6, cz: 1.6 * (1 - t) + 2.0 * t };
+  }
+  function floorZ(x, y) {
+    var s = section(x), c = Math.max(-1, Math.min(1, y / s.a));
+    return s.cz - s.bb * Math.sqrt(1 - c * c);
+  }
+  // Blender (x, y, z) -> three (x, z, -y)
+  function V(x, y, z) { return new THREE.Vector3(x, z, -y); }
+
+  // ---------- במה ----------
+  var canvas = document.getElementById('view');
+  var renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true, powerPreference: 'high-performance' });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.outputEncoding = THREE.sRGBEncoding;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 0.82;
+  var scene = new THREE.Scene();
+  var FOG = new THREE.Color(0x4a0d0a);
+  scene.background = FOG;
+  scene.fog = new THREE.FogExp2(FOG.getHex(), 0.045);
+  var camera = new THREE.PerspectiveCamera(62, 1, 0.05, 80);
+  camera.rotation.order = 'YXZ';
+
+  function resize() {
+    var w = window.innerWidth, h = window.innerHeight;
+    renderer.setSize(w, h, false);
+    camera.aspect = w / h; camera.updateProjectionMatrix();
+  }
+  window.addEventListener('resize', resize); resize();
+
+  // ---------- אור ----------
+  scene.add(new THREE.HemisphereLight(0xff9a80, 0x2a0504, 0.22));
+  function lamp(x, y, z, color, intensity, dist) {
+    var l = new THREE.PointLight(color, intensity, dist, 1.6); l.position.copy(V(x, y, z)); scene.add(l); return l;
+  }
+  [[12, 1.2], [6.5, -1.2], [1, 1.2], [-4, -1.2]].forEach(function (p) { lamp(p[0], p[1], 3.9, 0xff8a66, 0.75, 15); });
+  [-7.5, -2.6, 2.6, 7.5].forEach(function (y) { lamp(VX + 0.6, y, VZ + 1.7, 0xffb080, 1.25, 11); });
+  var wound = new THREE.SpotLight(0xffe6d2, 1.9, 22, 1.15, 0.6, 1.2); wound.position.copy(V(3.2, 0.2, 4.6)); wound.target.position.copy(V(1.6, 0, 0));
+  wound.castShadow = true; wound.shadow.mapSize.set(2048, 2048); wound.shadow.camera.near = 0.5; wound.shadow.camera.far = 14; wound.shadow.bias = -0.0008; wound.shadow.normalBias = 0.04; wound.shadow.radius = 5;
+  scene.add(wound); scene.add(wound.target);                    // אור הפצע, מלמעלה
+  lamp(CELL[0] + 1.2, CELL[1] - 1.6, CELL[2] + 1.6, 0xffcca6, 0.7, 7);
+  lamp(PED[0] + 0.5, PED[1] + 0.9, PED[2] + 2.5, 0xffdcb8, 0.75, 7);
+  var toxGlow = lamp(TOX[0], TOX[1], TOX[2], 0xff2a78, 0.9, 6);
+
+  // ---------- חומרים ----------
+  var M = {
+    cell: new THREE.MeshPhysicalMaterial({ color: 0xe0915c, roughness: 0.25, clearcoat: 0.6, clearcoatRoughness: 0.2,
+      transparent: true, opacity: 0.66, depthWrite: false, emissive: 0x5a2410, emissiveIntensity: 0.3 }),
+    nucleus: new THREE.MeshStandardMaterial({ color: 0x7a3a8e, roughness: 0.5, emissive: 0x2a0a30, emissiveIntensity: 0.6 }),
+    organelle: new THREE.MeshStandardMaterial({ color: 0xe86a28, roughness: 0.5, emissive: 0x5a1e06, emissiveIntensity: 0.6 }),
+    phago: new THREE.MeshPhysicalMaterial({ color: 0x8279b8, roughness: 0.4, clearcoat: 0.4, clearcoatRoughness: 0.3 }),
+    antibody: new THREE.MeshStandardMaterial({ color: 0xd9ccb0, roughness: 0.75 }),
+    emblem: new THREE.MeshBasicMaterial({ color: 0xf2f2f2 }),
+    signal: new THREE.MeshBasicMaterial({ color: 0xc8c8c8 }),
+    toxin: new THREE.MeshStandardMaterial({ color: 0xff3d8f, roughness: 0.3, emissive: 0xc81058, emissiveIntensity: 0.55, flatShading: true }),
+    pedestal: new THREE.MeshPhysicalMaterial({ color: 0x4e0c18, roughness: 0.35, clearcoat: 0.5, clearcoatRoughness: 0.2 }),
+    rim: new THREE.MeshStandardMaterial({ color: 0xeadcc8, roughness: 0.4, emissive: 0x4a3c30, emissiveIntensity: 0.5 }),
+    rbc: new THREE.MeshPhysicalMaterial({ color: 0x8f0a07, roughness: 0.35, clearcoat: 0.3, clearcoatRoughness: 0.3 })
+  };
+  function wallMaterial(src) {
+    var m = new THREE.MeshPhysicalMaterial({ map: src.map, normalMap: src.normalMap, roughness: 0.36,
+      clearcoat: 0.55, clearcoatRoughness: 0.18, side: THREE.DoubleSide });
+    if (m.map) { m.map.anisotropy = renderer.capabilities.getMaxAnisotropy(); }
+    m.normalScale = new THREE.Vector2(1.2, 1.2);
+    return m;
+  }
+
+  // ---------- שחקן ----------
+  var player = { x: 8.6, y: 1.2, yaw: Math.PI / 2, pitch: 0 };   // yaw: 0 = אל ‎-Z של three; ‎π/2 = אל ‎-X, לעומק המנהרה
+  var BLOCK = [[CELL[0], CELL[1], 2.25], [PH[0], PH[1], 1.9], [PED[0], PED[1], 1.75], [TOX[0], TOX[1], 0.8]];
+  function constrain() {
+    player.x = Math.max(-8.0, Math.min(13.6, player.x));
+    var wide = Math.min(3.5, section(player.x).a * 0.62);       // ליד הפתח המנהרה מצטמצמת
+    player.y = Math.max(-wide, Math.min(wide, player.y));
+    BLOCK.forEach(function (b) {
+      var dx = player.x - b[0], dy = player.y - b[1], d = Math.sqrt(dx * dx + dy * dy);
+      if (d < b[2]) { d = d || 0.001; player.x = b[0] + dx / d * b[2]; player.y = b[1] + dy / d * b[2]; }
+    });
+  }
+  function placeCamera() {
+    camera.position.copy(V(player.x, player.y, floorZ(player.x, player.y) + EYE));
+    camera.rotation.set(player.pitch, player.yaw, 0);
+  }
+
+  // ---------- שליטה ----------
+  var keys = {}, moved = false;
+  var hint = document.getElementById('hint'), stick = document.getElementById('stick'), knob = stick.firstChild;
+  var isTouch = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+  hint.innerHTML = isTouch ? ICON.touch : ICON.keys; hint.setAttribute('aria-label', isTouch ? T.touch : T.keys);
+  function firstMove() { if (!moved) { moved = true; setTimeout(function () { hint.classList.add('off'); }, 1500); } }
+  window.addEventListener('keydown', function (e) { keys[e.code] = true; if (/^(Arrow|Key[WASD])/.test(e.code)) { e.preventDefault(); firstMove(); } });
+  window.addEventListener('keyup', function (e) { keys[e.code] = false; });
+  window.addEventListener('blur', function () { keys = {}; });
+
+  var look = null, walk = null, joy = { x: 0, y: 0 };
+  canvas.addEventListener('pointerdown', function (e) {
+    canvas.setPointerCapture(e.pointerId);
+    if (e.pointerType === 'touch' && e.clientX < window.innerWidth * 0.45 && !walk) {
+      walk = { id: e.pointerId, x: e.clientX, y: e.clientY };
+      stick.style.display = 'block'; stick.style.left = e.clientX + 'px'; stick.style.top = e.clientY + 'px';
+      knob.style.transform = 'translate(0,0)';
+    } else if (!look) {
+      look = { id: e.pointerId, x: e.clientX, y: e.clientY }; canvas.classList.add('drag');
+    }
+  });
+  canvas.addEventListener('pointermove', function (e) {
+    if (walk && e.pointerId === walk.id) {
+      var dx = e.clientX - walk.x, dy = e.clientY - walk.y, d = Math.sqrt(dx * dx + dy * dy), m = 50;
+      if (d > m) { dx = dx / d * m; dy = dy / d * m; }
+      joy.x = dx / m; joy.y = dy / m;
+      knob.style.transform = 'translate(' + dx + 'px,' + dy + 'px)'; firstMove();
+    } else if (look && e.pointerId === look.id) {
+      var k = 0.0042;
+      player.yaw -= (e.clientX - look.x) * k;
+      player.pitch = Math.max(-1.1, Math.min(1.1, player.pitch - (e.clientY - look.y) * k));
+      look.x = e.clientX; look.y = e.clientY; firstMove();
+    }
+  });
+  function release(e) {
+    if (walk && e.pointerId === walk.id) { walk = null; joy.x = joy.y = 0; stick.style.display = 'none'; }
+    if (look && e.pointerId === look.id) { look = null; canvas.classList.remove('drag'); }
+  }
+  canvas.addEventListener('pointerup', release); canvas.addEventListener('pointercancel', release);
+  canvas.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+
+  function step(dt) {
+    var f = (keys.KeyW || keys.ArrowUp ? 1 : 0) - (keys.KeyS || keys.ArrowDown ? 1 : 0) - joy.y;
+    var s = (keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0) + joy.x;
+    if (keys.ArrowLeft) { player.yaw += 1.6 * dt; }
+    if (keys.ArrowRight) { player.yaw -= 1.6 * dt; }
+    var len = Math.sqrt(f * f + s * s);
+    if (len > 0.01) {
+      if (len > 1) { f /= len; s /= len; }
+      var sp = 3.2 * dt, sin = Math.sin(player.yaw), cos = Math.cos(player.yaw);
+      // קדימה ב־three: ‎(-sin, 0, -cos)‎. ב־Blender: x = -sin, y = +cos
+      player.x += (-sin * f + cos * s) * sp;
+      player.y += (cos * f + sin * s) * sp;
+      constrain();
+    }
+    placeCamera();
+  }
+
+  // ---------- תאי דם אדומים בזרם ----------
+  var flows = [];
+  function rnd(a, b) { return a + Math.random() * (b - a); }
+  function bloodCells(geo) {
+    var dummy = new THREE.Object3D();
+    function make(n, init, advance) {
+      var mesh = new THREE.InstancedMesh(geo, M.rbc, n), items = [];
+      for (var i = 0; i < n; i++) { items.push(init()); }
+      mesh.frustumCulled = false; mesh.castShadow = true; scene.add(mesh);
+      flows.push(function (dt, t) {
+        for (var i = 0; i < n; i++) {
+          var c = items[i]; advance(c, dt);
+          dummy.position.copy(V(c.x, c.y, c.z + Math.sin(t * c.w + c.p) * 0.06));
+          dummy.rotation.set(c.rx + t * c.sx, c.ry + t * c.sy, c.rz);
+          dummy.scale.setScalar(c.s); dummy.updateMatrix(); mesh.setMatrixAt(i, dummy.matrix);
+        }
+        mesh.instanceMatrix.needsUpdate = true;
+      });
+    }
+    function base() {
+      return { s: rnd(0.3, 0.42), rx: rnd(0, 6.28), ry: rnd(0, 6.28), rz: rnd(0, 6.28), sx: rnd(-0.35, 0.35), sy: rnd(-0.35, 0.35),
+        w: rnd(0.4, 1.1), p: rnd(0, 6.28), v: rnd(0.25, 0.6) };
+    }
+    // באזור הפצע: מעל הראש ולאורך הדפנות, כך שאזור ההליכה והמבט נשאר פנוי
+    make(110, function () {
+      var c = base(), ok = false;
+      while (!ok) {
+        var th = rnd(0, 6.283), rho = rnd(0.35, 0.86);
+        c.y = 5 * rho * Math.cos(th); c.z = 1.6 + (Math.sin(th) >= 0 ? 3.3 : 1.6) * rho * Math.sin(th);
+        ok = !(c.z < 3.15 && Math.abs(c.y) < 4.1);
+      }
+      c.x = rnd(-6.5, 14.5); return c;
+    }, function (c, dt) { c.x -= c.v * dt; if (c.x < -6.5) { c.x = 14.5; } });
+    // בכלי הדם שבצד: זרימה מהירה יותר, מאחורי אזור ההדגמה ומעליו
+    make(60, function () {
+      var c = base(), ok = false;
+      while (!ok) {
+        var th = rnd(0, 6.283), rho = rnd(0.1, 0.82);
+        c.x = VX + VR * rho * Math.cos(th); c.z = VZ + VR * rho * Math.sin(th);
+        ok = !(c.z > 0.9 && c.z < 3.5);          // רק מעל ההדגמה ומתחתיה, כדי שלא יסתירו אותה
+      }
+      c.y = rnd(-11, 11); c.v = rnd(0.9, 1.6); return c;
+    }, function (c, dt) { c.y += c.v * dt; if (c.y > 11) { c.y = -11; } });
+  }
+
+  function dot() {
+    var c = document.createElement('canvas'); c.width = c.height = 32; var g = c.getContext('2d');
+    g.fillStyle = '#fff'; g.beginPath(); g.arc(16, 16, 14, 0, 6.3); g.fill();
+    return new THREE.CanvasTexture(c);
+  }
+
+  // ---------- חלקיקי פלזמה ----------
+  function plasma() {
+    var n = 520, pos = new Float32Array(n * 3), vel = [];
+    for (var i = 0; i < n; i++) {
+      var x = rnd(-9, 14.5), s = section(x), p = V(x, rnd(-0.8, 0.8) * s.a, rnd(0.4, 0.8 * (s.cz + s.bt)));
+      pos[i * 3] = p.x; pos[i * 3 + 1] = p.y; pos[i * 3 + 2] = p.z; vel.push(rnd(0.08, 0.3), rnd(0, 6.28));
+    }
+    var g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    var pts = new THREE.Points(g, new THREE.PointsMaterial({ color: 0xffe6b4, size: 0.06, sizeAttenuation: true, transparent: true, opacity: 0.85, map: dot(), alphaTest: 0.2 }));
+    pts.frustumCulled = false; scene.add(pts);
+    flows.push(function (dt, t) {
+      for (var i = 0; i < n; i++) {
+        pos[i * 3] -= vel[i * 2] * dt; pos[i * 3 + 1] += Math.sin(t * 0.6 + vel[i * 2 + 1]) * 0.02 * dt;
+        if (pos[i * 3] < -9) { pos[i * 3] = 14.5; }
+      }
+      g.attributes.position.needsUpdate = true;
+    });
+  }
+
+  // ---------- טעינת החלל ----------
+  var alive = [];
+  function build(gltf) {
+    var root = gltf.scene, rbcGeo = null, take = [];
+    root.traverse(function (o) { if (o.isMesh) { take.push(o); } });
+    take.forEach(function (o) {
+      var n = o.name;
+      if (n === 'tunnel' || n === 'vessel') { o.material = wallMaterial(o.material); }
+      else if (n === 'rbc') { rbcGeo = o.geometry; o.parent.remove(o); }
+      else if (n === 'cell') { o.material = M.cell; o.renderOrder = 2; }
+      else if (n === 'nucleus') { o.material = M.nucleus; }
+      else if (n === 'organelles') { o.material = M.organelle; }
+      else if (n === 'phagocyte') { o.material = M.phago; }
+      else if (n === 'pedestal') { o.material = M.pedestal; }
+      else if (n.indexOf('cup_') === 0) { o.material = M.rim; }
+      else if (n.indexOf('antibody_') === 0) { o.material = M.antibody; }
+      else if (n.indexOf('emblem_') === 0) { o.material = M.emblem; }
+      else if (n.indexOf('signal_') === 0) { o.material = M.signal; }
+      else if (n.indexOf('toxin_') === 0) { o.material = M.toxin; }
+    });
+    take.forEach(function (o) { if (o.name === 'tunnel' || o.name === 'vessel') { o.receiveShadow = true; } else { o.castShadow = true; } });
+    scene.add(root);
+    function get(n) { return root.getObjectByName(n); }
+    var ph = get('phagocyte'), phs = ph.scale.clone();
+    alive.push(function (dt, t) { ph.scale.set(phs.x * (1 + Math.sin(t * 0.5) * 0.03), phs.y * (1 + Math.sin(t * 0.7 + 1) * 0.025), phs.z * (1 + Math.cos(t * 0.5) * 0.03)); });
+    var cell = get('cell'), cs = cell.scale.clone();
+    alive.push(function (dt, t) { var k = 1 + Math.sin(t * 0.6) * 0.012; cell.scale.set(cs.x * k, cs.y * k, cs.z * k); });
+
+    bloodCells(rbcGeo); plasma();
+    window.initPuzzle({ V: V, player: player, camera: camera, canvas: canvas, alive: alive, toxGlow: toxGlow, dot: dot,
+      TOX: TOX, CELL: CELL, PED: PED, cellMat: M.cell, lamp: lamp, floorZ: floorZ, block: BLOCK, scene: scene, home: function () { player.x = 8.6; player.y = 1.2; player.yaw = Math.PI / 2; player.pitch = 0; } }, root);
+    document.getElementById('load').classList.add('off');
+    window.__ready = true;
+  }
+
+  function decode(b64) {
+    var bin = atob(b64), n = bin.length, u8 = new Uint8Array(n);
+    for (var i = 0; i < n; i++) { u8[i] = bin.charCodeAt(i); }
+    return u8.buffer;
+  }
+  new THREE.GLTFLoader().parse(decode(window.SCENE_GLB), '', build, function (e) {
+    document.getElementById('load').textContent = 'הטעינה נכשלה'; console.error(e);
+  });
+  window.SCENE_GLB = null;
+
+  // ---------- לולאה ----------
+  var clock = new THREE.Clock(), frames = 0, fpsT = 0;
+  var now = 0;
+  function frame(dt) {
+    var i, t; now += dt; t = now;
+    step(dt);
+    for (i = 0; i < flows.length; i++) { flows[i](dt, t); }
+    for (i = 0; i < alive.length; i++) { alive[i](dt, t); }
+    renderer.render(scene, camera);
+  }
+  // לבדיקות: מקדם את העולם גם כשהלשונית מוסתרת
+  window.__step = function (seconds) { for (var n = Math.round(seconds * 30); n > 0; n--) { frame(1 / 30); } };
+  function tick() {
+    var dt = Math.min(clock.getDelta(), 0.05);
+    frame(dt);
+    requestAnimationFrame(tick); frames++; fpsT += dt; if (fpsT >= 1) { window.__fps = Math.round(frames / fpsT); frames = 0; fpsT = 0; }
+  }
+  placeCamera(); tick();
+
+  // לבדיקות ולהדגמה
+  window.__tp = function (x, y, yawDeg, pitchDeg) { player.x = x; player.y = y; player.yaw = yawDeg * Math.PI / 180; player.pitch = (pitchDeg || 0) * Math.PI / 180; constrain(); placeCamera(); };
+  // index.html#tp=5.6,0.2,118,-8 פותח בנקודה ובכיוון האלה
+  var tp = /tp=([-\d.,]+)/.exec(location.hash || '');
+  if (tp) { tp = tp[1].split(',').map(Number); window.__tp(tp[0], tp[1], tp[2] || 0, tp[3] || 0); }
+  window.__player = function () { return { x: +player.x.toFixed(2), y: +player.y.toFixed(2), yaw: Math.round(player.yaw * 180 / Math.PI), fps: window.__fps }; };
+})();
+</script>
+</body>
+</html>
